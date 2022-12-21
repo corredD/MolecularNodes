@@ -29,35 +29,35 @@ def fix_file_cif(file, new_file_name):
 
 def add_each_chain(mol, n_chains = 3):
     mol = mol[0]
-    
+
     coll_mn = tools.coll_mn()
     coll_models = bpy.data.collections.get('CellPackComponents')
     if not coll_models:
         coll_models = bpy.data.collections.new('CellPackComponents')
         coll_mn.children.link(coll_models)
-    
+
     chains_unique = np.unique(mol.chain_id)
     chain_number = np.fromiter(
         map(
             lambda x: np.searchsorted(chains_unique, x), 
             mol.chain_id
-        ), 
+        ),
         dtype=int
     )
-    
+
     if len(chains_unique) < n_chains:
         n_chains = len(chains_unique)
-    
+
     for i in range(n_chains):
         mol_sub = mol[chain_number == i]
         mol_name = str(chains_unique[i])
-        
+
         load.create_molecule(
-            mol_array = [mol_sub], 
-            mol_name = mol_name, 
-            collection = coll_models
+            mol_array=[mol_sub],
+            mol_name=mol_name,
+            collection=coll_models
             )
-        
+
 
 def create_cell(transforms):
     trans_positions = np.array([trans[1] for trans in transforms.values()])

@@ -25,6 +25,9 @@ def get_transformations_pdbx(file_pdbx):
                     assembly_gen_category["assembly_id"],
                     assembly_gen_category["oper_expression"],
                     assembly_gen_category["asym_id_list"]):
+        # skip until biotite fix the issue
+        if len(op_expr.split("-")) > 2:
+            continue
         operations = pdbx.convert._parse_operation_expression(op_expr)
         asym_ids = asym_id_expr.split(",")
         if aid not in transform_dict:

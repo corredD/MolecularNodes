@@ -7,32 +7,52 @@ from . import assembly
 from . import nodes
 
 world_scale = 0.01
-def molecule_rcsb(pdb_code, 
-                  center_molecule=False, 
-                  del_solvent=True, 
-                  include_bonds=True, 
-                  starting_style=0, 
+
+
+def molecule_rcsb(pdb_code,
+                  center_molecule=False,
+                  del_solvent=True,
+                  include_bonds=True,
+                  starting_style=0,
                   setup_nodes=True
                   ):
-    
-    mol, file = open_structure_rcsb(pdb_code = pdb_code, include_bonds=include_bonds)
+    mol, file = open_structure_rcsb(pdb_code=pdb_code,
+                                    include_bonds=include_bonds)
     mol_object, coll_frames = create_molecule(
-        mol_array = mol,
-        mol_name = pdb_code,
-        center_molecule = center_molecule,
-        del_solvent = del_solvent, 
-        include_bonds = include_bonds
-        )
-    
+                                            mol_array=mol,
+                                            mol_name=pdb_code,
+                                            center_molecule=center_molecule,
+                                            del_solvent=del_solvent,
+                                            include_bonds=include_bonds
+                                            )
     if setup_nodes:
         nodes.create_starting_node_tree(
-            obj = mol_object, 
-            coll_frames=coll_frames, 
-            starting_style = starting_style
+            obj=mol_object,
+            coll_frames=coll_frames,
+            starting_style=starting_style
             )
-    
     mol_object['bio_transform_dict'] = file['bioAssemblyList']
-    
+    return mol_object
+
+
+def molecule_rcsb_cif(pdb_code,
+                      center_molecule=False,
+                      del_solvent=True,
+                      include_bonds=True,
+                      starting_style=0,
+                      setup_nodes=True
+                      ):
+    mol, file = open_structure_rcsb_cif(pdb_code=pdb_code,
+                                        include_bonds=include_bonds)
+    transforms = assembly.get_transformations_pdbx(file)
+    mol_object = None
+    if transforms is not None:
+        chains_unique = np.unique(mol.chain_id)
+        # use the default first BU
+        aid = list(transforms.keys())[0]
+        mol_object = add_each_chain(mol, n_chains=len(chains_unique),
+                                    ntr=-1, transforms=transforms, a_id=aid,
+                                    transpose=True, vector=[0.0, 0.0, 1.0])
     return mol_object
 
 
@@ -59,7 +79,7 @@ def ApplyMatrix(coords, mat):
 
 def matrixToFacesMesh(name, matrices, collection,
                       vector=[0.0, 1.0, 0.0], transpose=True, **kw):
-    # what is up-left-forward? 
+    #  what is up-left-forward?
     axe = rerieveAxis(vector)
     quad = {"+Z": [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]],  # XY
             "+Y": [[-1, 0, 1], [1, 0, 1], [1, 0, -1], [-1, 0, -1]],  # XZ
@@ -117,9 +137,10 @@ def add_each_chain(mol, n_chains=3, ntr=3, transforms=None,
     for i in range(n_chains):
         mol_sub = mol[chain_number == i]
         mol_name = str(chains_unique[i])
-        print(n_chains, i, mol_name, (mol_name not in transforms[a_id]), a_id)
+        print(n_chains, i, mol_name, (mol_name in transforms[a_id]), a_id)
         if mol_name not in transforms[a_id]:
             # check label_asym_id
+            print("PB", mol_name, transforms[a_id].keys())
             continue
         mol_object, coll_frames = create_molecule(
             mol_array=[mol_sub],
@@ -148,7 +169,7 @@ def add_each_chain(mol, n_chains=3, ntr=3, transforms=None,
     return coll_models
 
 
-def molecule_local(file_path, 
+def molecule_local(file_path,
                    mol_name="Name",
                    include_bonds=True, 
                    center_molecule=True, 
@@ -192,10 +213,12 @@ def molecule_local(file_path,
             self.report({"WARNING"}, message='Unable to parse biological assembly information.')
         if transforms is not None:
             chains_unique = np.unique(mol.chain_id)
+            # use the default first BU
             aid = list(transforms.keys())[0]
             mol_object = add_each_chain(mol, n_chains=len(chains_unique),
-                           ntr=-1, transforms=transforms, a_id=aid,
-                           transpose=True, vector=[0.0, 0.0, -1.0])
+                                        ntr=-1, transforms=transforms,
+                                        a_id=aid, transpose=True,
+                                        vector=[0.0, 0.0, -1.0])
             # mol_object['bio_transform_dict'] = transforms
         # if include_bonds chosen but no bonds currently exist (mol.bonds is None)
         # then attempt to find bonds by distance
@@ -214,6 +237,13 @@ def open_structure_rcsb(pdb_code, include_bonds = True):
     return mol, file
 
 
+def open_structure_rcsb_cif(pdb_code, include_bonds = True):
+    import biotite.structure.io.pdbx as pdbx
+    import biotite.database.rcsb as rcsb
+    file = pdbx.PDBxFile.read(rcsb.fetch(pdb_code, "cif"))
+    return open_structure_pdbx(file, include_bonds=include_bonds)
+
+
 def open_structure_local_pdb(file_path, include_bonds = True):
     import biotite.structure.io.pdb as pdb
     
@@ -224,12 +254,17 @@ def open_structure_local_pdb(file_path, include_bonds = True):
     mol = pdb.get_structure(file, extra_fields = ['b_factor', 'charge'], include_bonds = include_bonds)
     return mol, file
 
+
 def open_structure_local_pdbx(file_path, include_bonds = True):
     import biotite.structure as struc
     import biotite.structure.io.pdbx as pdbx
 
     file = pdbx.PDBxFile.read(file_path)
+    return open_structure_pdbx(file, include_bonds=include_bonds)
 
+def open_structure_pdbx(file, include_bonds = True):
+    import biotite.structure as struc
+    import biotite.structure.io.pdbx as pdbx
     # returns a numpy array stack, where each array in the stack is a model in the 
     # the file. The stack will be of length = 1 if there is only one model in the file
     mol  = pdbx.get_structure(file, extra_fields = ['b_factor', 'charge'], use_author_fields=False)

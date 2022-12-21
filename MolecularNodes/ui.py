@@ -23,24 +23,47 @@ class MOL_OT_Import_Protein_RCSB(bpy.types.Operator):
 
     def execute(self, context):
         pdb_code = bpy.context.scene.mol_pdb_code
-        
+
         mol_object = load.molecule_rcsb(
             pdb_code=pdb_code,
-            center_molecule=bpy.context.scene.mol_import_center, 
+            center_molecule=bpy.context.scene.mol_import_center,
             del_solvent=bpy.context.scene.mol_import_del_solvent,
             include_bonds=bpy.context.scene.mol_import_include_bonds,
             starting_style=bpy.context.scene.mol_import_default_style
         )
-        
+
         bpy.context.view_layer.objects.active = mol_object
         self.report({'INFO'}, message=f"Imported '{pdb_code}' as {mol_object.name}")
-        
         return {"FINISHED"}
 
     def invoke(self, context, event):
         return self.execute(context)
 
 
+# operator that calls the function to import the structure from the PDB-CIF
+class MOL_OT_Import_Protein_RCSB_CIF(bpy.types.Operator):
+    bl_idname = "mol.import_protein_rcsb_cif"
+    bl_label = "import_protein_fetch_pdb"
+    bl_description = "Download and open a structure from the Protein Data Bank"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return not False
+
+    def execute(self, context):
+        pdb_code = bpy.context.scene.mol_pdb_code
+        load.molecule_rcsb_cif(
+            pdb_code=pdb_code,
+            center_molecule=bpy.context.scene.mol_import_center,
+            del_solvent=bpy.context.scene.mol_import_del_solvent,
+            include_bonds=bpy.context.scene.mol_import_include_bonds,
+            starting_style=bpy.context.scene.mol_import_default_style
+        )
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        return self.execute(context)
 
 
 # operator that calls the function to import the structure from a local file
@@ -124,6 +147,22 @@ def MOL_PT_panel_rcsb(layout_function, ):
     row_import = col_main.row()
     row_import.prop(bpy.context.scene, 'mol_pdb_code', text='PDB ID', icon_value=0, emboss=True)
     row_import.operator('mol.import_protein_rcsb', text='Download', icon_value=169, emboss=True, depress=False)
+
+
+def MOL_PT_panel_rcsb_cif(layout_function, ):
+    col_main = layout_function.column(heading = '', align = False)
+    col_main.alert = False
+    col_main.enabled = True
+    col_main.active = True
+    col_main.use_property_split = False
+    col_main.use_property_decorate = False
+    col_main.scale_x = 1.0
+    col_main.scale_y = 1.0
+    col_main.alignment = 'Expand'.upper()
+    col_main.label(text = "Download from PDB-CIF", icon_value = 3)
+    row_import = col_main.row()
+    row_import.prop(bpy.context.scene, 'mol_pdb_code', text='PDB ID', icon_value=0, emboss=True)
+    row_import.operator('mol.import_protein_rcsb_cif', text='Download', icon_value=169, emboss=True, depress=False)
 
 def MOL_PT_panel_local(layout_function, ):
     col_main = layout_function.column(heading = '', align = False)
@@ -274,16 +313,20 @@ def MOL_PT_panel_ui(layout_function, ):
         row.enabled = True
         row.alert = False
         MOL_change_import_interface(row, 'PDB',           0,  72)
-        MOL_change_import_interface(row, 'Local File',    1, 108)
-        MOL_change_import_interface(row, 'MD Trajectory', 2, 487)
-        
+        MOL_change_import_interface(row, 'PDB CIF',       1,  72)
+        MOL_change_import_interface(row, 'Local File',    2, 108)
+        MOL_change_import_interface(row, 'MD Trajectory', 3, 487)
+
         layout_function = box.box()
         if bpy.context.scene.mol_import_panel_selection == 0:
             MOL_PT_panel_rcsb(layout_function)
         elif bpy.context.scene.mol_import_panel_selection == 1:
+            MOL_PT_panel_rcsb_cif(layout_function)            
+        elif bpy.context.scene.mol_import_panel_selection == 2:
             MOL_PT_panel_local(layout_function)
         else:
             MOL_PT_panel_md_traj(layout_function)
+
 
 class MOL_PT_panel(bpy.types.Panel):
     bl_label = 'Molecular Nodes'
