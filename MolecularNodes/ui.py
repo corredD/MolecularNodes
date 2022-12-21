@@ -57,21 +57,21 @@ class MOL_OT_Import_Protein_Local(bpy.types.Operator):
     def execute(self, context):
         file_path = bpy.context.scene.mol_import_local_path
         include_bonds = bpy.context.scene.mol_import_include_bonds
-        
-        
+
         mol_object = load.molecule_local(
-            file_path=file_path, 
+            file_path=file_path,
             mol_name=bpy.context.scene.mol_import_local_name,
-            include_bonds=include_bonds, 
-            center_molecule=bpy.context.scene.mol_import_center, 
-            del_solvent=bpy.context.scene.mol_import_del_solvent, 
-            default_style=bpy.context.scene.mol_import_default_style, 
+            include_bonds=include_bonds,
+            center_molecule=bpy.context.scene.mol_import_center,
+            del_solvent=bpy.context.scene.mol_import_del_solvent,
+            default_style=bpy.context.scene.mol_import_default_style,
             setup_nodes=True
             )
-        
+
         # return the good news!
-        bpy.context.view_layer.objects.active = mol_object
-        self.report({'INFO'}, message=f"Imported '{file_path}' as {mol_object.name}")
+        if mol_object is not None:
+            bpy.context.view_layer.objects.active = mol_object
+            self.report({'INFO'}, message=f"Imported '{file_path}' as {mol_object.name}")
         return {"FINISHED"}
 
     def invoke(self, context, event):
@@ -393,7 +393,7 @@ class MOL_OT_Assembly_Bio(bpy.types.Operator):
         try:
             node_bio_assembly = assembly.create_biological_assembly_node(
                 name = obj.name, 
-                transform_dict = assembly.get_transformations_mmtf(obj['bio_transform_dict'])
+                transform_dict = obj['bio_transform_dict'] # assembly.get_transformations_pdbx(obj['bio_transform_dict'])
             )
         except:
             node_bio_assembly = None

@@ -2,15 +2,41 @@ import bpy
 import numpy as np
 from . import nodes
 
+
 def get_transformations_pdbx(file_pdbx):
     import biotite.structure.io.pdbx as pdbx
-    #The output transform_dict has an entry for each transformation, indexable by the string
+    # The output transform_dict has an entry for each transformation, indexable by the string
     # integer of the assembly number (e.g. transform_dict.get('1')) which contains tuple of the 3x3 rotation 
     # matrix and the 1x3 transform matrix
-    
-    transform_dict = pdbx.convert._get_transformations(file_pdbx.get_category('pdbx_struct_oper_list'))
-    
+    assembly_gen_category = file_pdbx.get_category(
+        "pdbx_struct_assembly_gen", expect_looped=True
+    )
+    struct_oper_category = file_pdbx.get_category(
+        "pdbx_struct_oper_list", expect_looped=True
+    )
+    transformations = pdbx.convert._get_transformations(struct_oper_category)
+    # assembly_id = assembly_gen_category["assembly_id"][0]
+    # transform_dict = pdbx.convert._get_transformations(file_pdbx.get_category('pdbx_struct_oper_list'))
+    # extra_fields_and_asym = ["label_asym_id"]
+    # label_asym_id = np.unique(file_pdbx.get_category('atom_site')['label_asym_id'])
+    # auth_asym_id = np.unique(file_pdbx.get_category('atom_site')['auth_asym_id'])
+    transform_dict = {}
+    for aid, op_expr, asym_id_expr in zip(
+                    assembly_gen_category["assembly_id"],
+                    assembly_gen_category["oper_expression"],
+                    assembly_gen_category["asym_id_list"]):
+        operations = pdbx.convert._parse_operation_expression(op_expr)
+        asym_ids = asym_id_expr.split(",")
+        if aid not in transform_dict:
+            transform_dict[aid] = {}
+        for asym in asym_ids:
+            if asym not in transform_dict[aid]:
+                transform_dict[aid][asym] = []
+            for i, operation in enumerate(operations):
+                for op_step in operation:
+                    transform_dict[aid][asym].append(transformations[op_step])
     return transform_dict
+
 
 def get_transformations_pdb(file_pdb):
     from re import compile

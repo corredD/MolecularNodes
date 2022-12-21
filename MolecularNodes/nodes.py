@@ -269,18 +269,19 @@ def create_custom_surface(name, n_chains):
     
     return group
 
-def rotation_matrix(node_group, mat_rot, mat_trans, location = [0,0]):
+def rotation_matrix(node_group, mat_rot, mat_trans, location = [0,0], transpose = False):
     
     node_utils_rot = mol_append_node('MOL_utils_rotation_matrix')
     
     node = node_group.nodes.new('GeometryNodeGroup')
     node.node_tree = node_utils_rot
     node.location = location
-    
+    if transpose:
+        mat_rot = mat_rot.T
     for rot in range(3):
         for value in range(3):
             node.inputs[rot].default_value[value] = mat_rot[rot, value]
-    
+
     for value in range(3):
         node.inputs[3].default_value[value] = mat_trans[value]
     

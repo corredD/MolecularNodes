@@ -6,6 +6,7 @@ from . import data
 from . import assembly
 from . import nodes
 
+world_scale = 0.01
 def molecule_rcsb(pdb_code, 
                   center_molecule=False, 
                   del_solvent=True, 
@@ -34,6 +35,119 @@ def molecule_rcsb(pdb_code,
     
     return mol_object
 
+
+def rerieveAxis(axis):
+    dic = {"+X": [1., 0., 0.],
+           "-X": [-1., 0., 0.],
+           "+Y": [0., 1., 0.],
+           "-Y": [0., -1., 0.],
+           "+Z": [0., 0., 1.],
+           "-Z": [0., 0., -1.]}
+    axis = [float(int(axis[0])), float(int(axis[1])), float(int(axis[2]))]
+    for k in dic:
+        if list(axis) == dic[k]:
+            return k
+
+
+def ApplyMatrix(coords, mat):
+    mat = np.array(mat)
+    coords = np.array(coords)
+    one = np.ones((coords.shape[0], 1), coords.dtype.char)
+    c = np.concatenate((coords, one), 1)
+    return np.dot(c, np.transpose(mat))[:, :3]
+
+
+def matrixToFacesMesh(name, matrices, collection,
+                      vector=[0.0, 1.0, 0.0], transpose=True, **kw):
+    # what is up-left-forward? 
+    axe = rerieveAxis(vector)
+    quad = {"+Z": [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]],  # XY
+            "+Y": [[-1, 0, 1], [1, 0, 1], [1, 0, -1], [-1, 0, -1]],  # XZ
+            "+X": [[0, -1, 1], [0, 1, 1], [0, 1, -1], [0, -1, -1]],  # YZ
+            "-Z": [[-1, 1, 0], [-1, -1, 0], [1, -1, 0], [1, 1, 0]],  # XY
+            "-Y": [[-1, 0, 1], [1, 0, 1], [1, 0, -1], [-1, 0, -1]],  # XZ
+            "-X": [[0, -1, 1], [0, 1, 1], [0, 1, -1], [0, -1, -1]],  # YZ
+            }
+    eq = {"+X": "+Z",
+          "+Y": "+X",
+          "+Z": "+Z",
+          "-X": "+Z",
+          "-Y": "-X",
+          "-Z": "-Z"}
+    aquad = np.array(quad[eq[axe]])  # *50.0
+    print("matrixToFacesMesh", axe, vector, len(matrices), eq[axe])
+    v = []
+    f = []
+    one = np.array([[0], [0], [0], [1]])
+    for i, am in enumerate(matrices):
+        m = np.vstack([am[0].T, am[1]*world_scale])
+        m = np.concatenate((m, one), 1)
+        if transpose:
+            m = m.T
+        new_quad = ApplyMatrix(aquad, m)
+        v.extend(new_quad)
+        f.append([i*4+0, i*4+1, i*4+2, i*4+3])
+    mesh = bpy.data.meshes.new(name+"ds")
+    mesh.from_pydata(v, [], f)
+    aobject = bpy.data.objects.new(name, mesh)
+    collection.objects.link(aobject)
+    return aobject
+
+
+def add_each_chain(mol, n_chains=3, ntr=3, transforms=None,
+                   a_id='1',
+                   transpose=False, vector=[0.0, 1.0, 0.0]):
+    mol = mol[0]
+    collection_mn = coll_mn()
+    coll_models = bpy.data.collections.get('CellPackComponents')
+    if not coll_models:
+        coll_models = bpy.data.collections.new('CellPackComponents')
+        collection_mn.children.link(coll_models)
+    chains_unique = np.unique(mol.chain_id)
+    chain_number = np.fromiter(
+        map(
+            lambda x: np.searchsorted(chains_unique, x),
+            mol.chain_id
+        ),
+        dtype=int
+    )
+    if len(chains_unique) < n_chains:
+        n_chains = len(chains_unique)
+    all_r = []
+    for i in range(n_chains):
+        mol_sub = mol[chain_number == i]
+        mol_name = str(chains_unique[i])
+        print(n_chains, i, mol_name, (mol_name not in transforms[a_id]), a_id)
+        if mol_name not in transforms[a_id]:
+            # check label_asym_id
+            continue
+        mol_object, coll_frames = create_molecule(
+            mol_array=[mol_sub],
+            mol_name=mol_name,
+            center_molecule=False,
+            collection=coll_models
+            )
+        ltr = ntr
+        if ntr == -1:
+            ltr = len(transforms[a_id][mol_object.name])
+        ob_inst = matrixToFacesMesh(
+            mol_object.name+'instances',
+            transforms[a_id][mol_object.name][:ltr], coll_models,
+            vector=vector, transpose=transpose)
+        ob_inst.instance_type = 'FACES'
+        ob_inst.show_instancer_for_viewport = False
+        ob_inst.show_instancer_for_render = False
+        mol_object.parent = ob_inst
+        all_r.append([mol_object, coll_frames])
+    for mf in all_r:
+        nodes.create_starting_node_tree(
+            obj=mf[0],
+            coll_frames=mf[1],
+            starting_style=0
+        )
+    return coll_models
+
+
 def molecule_local(file_path, 
                    mol_name="Name",
                    include_bonds=True, 
@@ -43,51 +157,49 @@ def molecule_local(file_path,
                    setup_nodes=True
                    ): 
     import biotite.structure as struc
-    
-    
     import os
     file_path = os.path.abspath(file_path)
     file_ext = os.path.splitext(file_path)[1]
-    
     if file_ext == '.pdb':
         mol, file = open_structure_local_pdb(file_path, include_bonds)
         transforms = assembly.get_transformations_pdb(file)
+        if include_bonds and not mol.bonds:
+            mol.bonds = struc.connect_via_distances(mol, inter_residue=True)
+
+        mol_object, coll_frames = create_molecule(
+                                    mol_array=mol,
+                                    mol_name=mol_name,
+                                    center_molecule=center_molecule,
+                                    del_solvent=del_solvent,
+                                    include_bonds=include_bonds
+                                    )
+        if transforms:
+            mol_object['bio_transform_dict'] = (transforms)
+        # setup the required initial node tree on the object 
+        if setup_nodes:
+            nodes.create_starting_node_tree(
+                obj=mol_object,
+                coll_frames=coll_frames,
+                starting_style=default_style
+                )
+        return mol_object
     elif file_ext == '.pdbx' or file_ext == '.cif':
         mol, file = open_structure_local_pdbx(file_path, include_bonds)
         try:
             transforms = assembly.get_transformations_pdbx(file)
         except:
             transforms = None
-            # self.report({"WARNING"}, message='Unable to parse biological assembly information.')
-    
-    # if include_bonds chosen but no bonds currently exist (mol.bonds is None)
-    # then attempt to find bonds by distance
-    if include_bonds and not mol.bonds:
-        mol.bonds = struc.connect_via_distances(mol[0], inter_residue=True)
-    
-    mol_object, coll_frames = create_molecule(
-        mol_array = mol,
-        mol_name = mol_name,
-        center_molecule = center_molecule,
-        del_solvent = del_solvent, 
-        include_bonds = include_bonds
-        )
-    
-        
-    
-    # setup the required initial node tree on the object 
-    if setup_nodes:
-        nodes.create_starting_node_tree(
-            obj = mol_object,
-            coll_frames = coll_frames,
-            starting_style = default_style
-            )
-    
-    # if transforms:
-        # mol_object['bio_transform_dict'] = (transforms)
-        # mol_object['bio_transnform_dict'] = 'testing'
-        
-    return mol_object
+            self.report({"WARNING"}, message='Unable to parse biological assembly information.')
+        if transforms is not None:
+            chains_unique = np.unique(mol.chain_id)
+            aid = list(transforms.keys())[0]
+            mol_object = add_each_chain(mol, n_chains=len(chains_unique),
+                           ntr=-1, transforms=transforms, a_id=aid,
+                           transpose=True, vector=[0.0, 0.0, -1.0])
+            # mol_object['bio_transform_dict'] = transforms
+        # if include_bonds chosen but no bonds currently exist (mol.bonds is None)
+        # then attempt to find bonds by distance
+        return None
 
 
 def open_structure_rcsb(pdb_code, include_bonds = True):
@@ -115,12 +227,12 @@ def open_structure_local_pdb(file_path, include_bonds = True):
 def open_structure_local_pdbx(file_path, include_bonds = True):
     import biotite.structure as struc
     import biotite.structure.io.pdbx as pdbx
-    
+
     file = pdbx.PDBxFile.read(file_path)
-    
+
     # returns a numpy array stack, where each array in the stack is a model in the 
     # the file. The stack will be of length = 1 if there is only one model in the file
-    mol  = pdbx.get_structure(file, extra_fields = ['b_factor', 'charge'])
+    mol  = pdbx.get_structure(file, extra_fields = ['b_factor', 'charge'], use_author_fields=False)
     # pdbx doesn't include bond information apparently, so manually create
     # them here if requested
     if include_bonds:
@@ -152,33 +264,33 @@ def add_attribute(object, name, data, type = "FLOAT", domain = "POINT", add = Tr
 
 def create_molecule(mol_array, mol_name, center_molecule = False, del_solvent = False, include_bonds = False, collection = None):
     import biotite.structure as struc
-    
+
     if np.shape(mol_array)[0] > 1:
         mol_frames = mol_array
     else:
         mol_frames = None
-    
+
     mol_array = mol_array[0]
-    
+
     # remove the solvent from the structure if requested
     if del_solvent:
         mol_array = mol_array[np.invert(struc.filter_solvent(mol_array))]
 
-    world_scale = 0.01
+    # world_scale = 0.01
     locations = mol_array.coord * world_scale
-    
+
     centroid = np.array([0, 0, 0])
     if center_molecule:
         centroid = struc.centroid(mol_array) * world_scale
-    
 
-    # subtract the centroid from all of the positions to localise the molecule on the world origin
+    # subtract the centroid from all of the positions
+    # to localise the molecule on the world origin
     if center_molecule:
         locations = locations - centroid
 
     if not collection:
         collection = coll_mn()
-    
+
     if include_bonds:
         bonds = mol_array.bonds.as_array()
         mol_object = create_object(name = mol_name, collection = collection, locations = locations, bonds = bonds[:, [0,1]])
