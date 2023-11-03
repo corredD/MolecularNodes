@@ -45,13 +45,11 @@ def load_cellpack(file_path,
                   instance_nodes = True
                   ):
     obj_data, coll_cellpack = open_file(file_path, name=name, instance_nodes=instance_nodes)
-    
     starting_node_tree(obj_data, coll_cellpack, name = name, fraction = fraction)
-    
 
 
 def open_file(file, name="NewModel", get_transforms=True, instance_nodes=True):
-    print("openfile",file)
+    print("openfile", file)
     if Path(file).suffix in (".bcif", ".bin"):
         mol, transforms = bcif.parse(file)
         # get transforms and create data / CellPack Object
@@ -60,34 +58,37 @@ def open_file(file, name="NewModel", get_transforms=True, instance_nodes=True):
     else:
         file_open = pdbx.PDBxFile.read(file)
         print("file_open ok")
-        mol = pdbx.get_structure(file_open,  model=1, extra_fields=['label_entity_id'])
+        mol = pdbx.get_structure(file_open,
+                                 model=1,
+                                 extra_fields=['label_entity_id'])
         print("loaded mol", len(mol))
+        mol.add_annotation('entity_id', int)
+        mol.set_annotation('entity_id', mol.label_entity_id)
         transforms = assembly.cif.CIFAssemblyParser(file_open).get_assemblies()
         print("loaded transforms", len(transforms))
-        
+
         # get transforms and create data / CellPack Object
         transforms_array = assembly.mesh.get_transforms_from_dict(transforms)
         obj_data = assembly.mesh.create_data_object(transforms_array, name=name)
-    
-    chain_names = np.unique(mol.chain_id)
-    
-    obj_data['chain_id_unique'] = chain_names
 
+    chain_names = np.unique(mol.chain_id)
+    chain_id = np.searchsorted(np.unique(mol.chain_id), mol.chain_id)
+    mol.add_annotation('chain_ids', int)
+    mol.set_annotation('chain_ids', chain_id)
+    obj_data['chain_id_unique'] = chain_names
     coll_cellpack = coll.cellpack(f"{name}")
 
     for i, chain in enumerate(chain_names):
         atoms = mol[mol.chain_id == chain]
         print(chain, atoms.res_name[0])
-        # if atoms.res_name[0] == 'LIP': 
-        #     continue
         mol_object, coll_frames = load.create_molecule(
             MN_array=atoms,
             MN_name=f"{str(i).rjust(4, '0')}_{chain}",
+            has_chain_id=True,
             collection=coll_cellpack
             )
 
         colors = np.tile(random_rgb(i), (len(atoms), 1))
-
         obj.add_attribute(mol_object, name="Color", data=colors, type="FLOAT_COLOR", overwrite=True)
         if instance_nodes:
             nodes.create_starting_node_tree(mol_object, name = f"MN_pack_instance_{name}", set_color=False)

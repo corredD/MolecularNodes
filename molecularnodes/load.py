@@ -400,6 +400,7 @@ def create_molecule(MN_array,
                     del_solvent = False, 
                     include_bonds = False,
                     starting_style = 0,
+                    has_chain_id = False,
                     collection = None
                     ):
     import biotite.structure as struc
@@ -490,11 +491,12 @@ def create_molecule(MN_array,
         MN_object['ligands'] = np.unique(other_res)
         return np.array(res_nums)
 
-    
     def att_chain_id():
-        chain_id = np.searchsorted(np.unique(MN_array.chain_id), MN_array.chain_id)
-        return chain_id
-    
+        if has_chain_id:
+            return MN_array.chain_ids
+        else :
+            return np.searchsorted(np.unique(MN_array.chain_id), MN_array.chain_id)
+
     def att_entity_id():
         return MN_array.entity_id
     
