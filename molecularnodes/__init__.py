@@ -11,38 +11,62 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+from .utils import template_install
+from . import auto_load
+from .props import MolecularNodesObjectProperties
+from .ui.node_menu import MN_add_node_menu
+from .io.parse.mda import _rejuvenate_universe, _sync_universe
+import bpy
+
 bl_info = {
-    "name"        : "molecularnodes",
-    "author"      : "Brady Johnston",
-    "description" : "Toolbox for molecular animations in Blender & Geometry Nodes.",
-    "blender"     : (3, 5, 0),
-    "version"     : (2, 11, 0),
-    "location"    : "Scene Properties -> Molecular Nodes",
-    "warning"     : "",
-    "doc_url"     : "https://bradyajohnston.github.io/MolecularNodes/",
-    "tracker_url" : "https://github.com/BradyAJohnston/MolecularNodes/issues",
-    "category"    : "Import"
+    "name": "molecularnodes",
+    "author": "Brady Johnston",
+    "description": "Toolbox for molecular animations in Blender & Geometry Nodes.",
+    "blender": (4, 0, 0),
+    "version": (4, 0, 9),
+    "location": "Scene Properties -> Molecular Nodes",
+    "warning": "",
+    "doc_url": "https://bradyajohnston.github.io/MolecularNodes/",
+    "tracker_url": "https://github.com/BradyAJohnston/MolecularNodes/issues",
+    "category": "Import"
 }
 
-from . import auto_load
-from .mda import _rejuvenate_universe, _sync_universe
-from .ui import MN_add_node_menu
-import bpy
-from . import utils
-
 auto_load.init()
+
+universe_funcs = [_sync_universe, _rejuvenate_universe]
+
 
 def register():
     auto_load.register()
     bpy.types.NODE_MT_add.append(MN_add_node_menu)
-    utils.template_install()
+    bpy.types.Object.mn = bpy.props.PointerProperty(
+        type=MolecularNodesObjectProperties)
+    for func in universe_funcs:
+        try:
+            bpy.app.handlers.load_post.append(func)
+        except ValueError as e:
+            print(f"Filaed to append {func}, error: {e}.")
+    template_install()
+
 
 def unregister():
-    bpy.types.NODE_MT_add.remove(MN_add_node_menu)
-    auto_load.unregister()
-    bpy.app.handlers.load_post.remove(_rejuvenate_universe)
-    bpy.app.handlers.save_pre.remove(_sync_universe)
+    try:
+        bpy.types.NODE_MT_add.remove(MN_add_node_menu)
+        auto_load.unregister()
+        del bpy.types.Object.mn
+        for func in universe_funcs:
+            try:
+                bpy.app.handlers.load_post.remove(func)
+            except ValueError as e:
+                print(f"Failed to remove {func}, error: {e}.")
+    except RuntimeError:
+        pass
 
-# register won't be called when MN is run as a module
+
+# unregister()
+# register()
+
+
+# # register won't be called when MN is run as a module
 bpy.app.handlers.load_post.append(_rejuvenate_universe)
-bpy.app.handlers.save_pre.append(_sync_universe)
+bpy.app.handlers.save_post.append(_sync_universe)

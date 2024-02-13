@@ -2,8 +2,50 @@ import bpy
 import traceback
 import os
 import zipfile
-from .pref import ADDON_DIR
+import numpy as np
+from mathutils import Matrix
 from bpy.app.translations import pgettext_tip as tip_
+
+from .ui.pref import ADDON_DIR
+
+
+def lerp(a: np.ndarray, b: np.ndarray, t: float = 0.5) -> np.ndarray:
+    """
+    Linearly interpolate between two values.
+
+    Parameters
+    ----------
+    a : array_like
+        The starting value.
+    b : array_like
+        The ending value.
+    t : float, optional
+        The interpolation parameter. Default is 0.5.
+
+    Returns
+    -------
+    array_like
+        The interpolated value(s).
+
+    Notes
+    -----
+    This function performs linear interpolation between `a` and `b` using the
+    interpolation parameter `t` such that the result lies between `a` and `b`.
+
+    Examples
+    --------
+    >>> lerp(1, 2, 0.5)
+    1.5
+
+    >>> lerp(3, 7, 0.2)
+    3.8
+
+    >>> lerp([1, 2, 3], [4, 5, 6], 0.5)
+    array([2.5, 3.5, 4.5])
+
+    """
+    return np.add(a, np.multiply(np.subtract(b, a), t))
+
 
 def _module_filesystem_remove(path_base, module_name):
     # taken from the bpy.ops.preferences.app_template_install() operator source code
@@ -20,6 +62,7 @@ def _module_filesystem_remove(path_base, module_name):
                 shutil.rmtree(f_full)
             else:
                 os.remove(f_full)
+
 
 def _zipfile_root_namelist(file_to_extract):
     # taken from the bpy.ops.preferences.app_template_install() operator source code
@@ -39,10 +82,14 @@ def _zipfile_root_namelist(file_to_extract):
             root_paths.append(f)
     return root_paths
 
+
 def template_install():
-    template = os.path.join(os.path.abspath(ADDON_DIR), 'assets', 'template', 'MolecularNodes.zip')
+    print(os.path.abspath(ADDON_DIR))
+    template = os.path.join(os.path.abspath(ADDON_DIR),
+                            'assets', 'template', 'Molecular Nodes.zip')
     _install_template(template)
     bpy.utils.refresh_script_paths()
+
 
 def template_uninstall():
     import shutil
@@ -52,12 +99,13 @@ def template_uninstall():
             shutil.rmtree(path)
     bpy.utils.refresh_script_paths()
 
-def _install_template(filepath, overwrite = True):
+
+def _install_template(filepath, subfolder='', overwrite=True):
     # taken from the bpy.ops.preferences.app_template_install() operator source code
 
     path_app_templates = bpy.utils.user_resource(
         'SCRIPTS',
-        path=os.path.join("startup", "bl_app_templates_user"),
+        path=os.path.join("startup", "bl_app_templates_user", subfolder),
         create=True,
     )
 
@@ -83,7 +131,8 @@ def _install_template(filepath, overwrite = True):
                 _module_filesystem_remove(path_app_templates, f)
         else:
             for f in file_to_extract_root:
-                path_dest = os.path.join(path_app_templates, os.path.basename(f))
+                path_dest = os.path.join(
+                    path_app_templates, os.path.basename(f))
                 if os.path.exists(path_dest):
                     # self.report({'WARNING'}, tip_("File already installed to %r\n") % path_dest)
                     return {'CANCELLED'}
@@ -110,3 +159,38 @@ def _install_template(filepath, overwrite = True):
         (", ".join(sorted(app_templates_new)), filepath, path_app_templates)
     )
     print(msg)
+
+
+# data types for the np.array that will store per-chain symmetry operations
+dtype = [
+    ('assembly_id', int),
+    ('transform_id', int),
+    ('chain_id',    'U10'),
+    ('rotation',  float, 4),  # quaternion form
+    ('translation', float, 3)
+]
+
+
+def array_quaternions_from_dict(transforms_dict):
+    n_transforms = 0
+    for assembly in transforms_dict.values():
+        for transform in assembly:
+            n_transforms += len(transform[0])
+
+    arr = np.array((n_transforms), dtype=dtype)
+
+    transforms = []
+    for i, assembly in enumerate(transforms_dict.values()):
+        for j, transform in enumerate(assembly):
+            chains = transform[0]
+            matrix = transform[1]
+            arr = np.zeros((len(chains)), dtype=dtype)
+            translation, rotation, scale = Matrix(matrix).decompose()
+            arr['assembly_id'] = i + 1
+            arr['transform_id'] = j
+            arr['chain_id'] = chains
+            arr['rotation'] = rotation
+            arr['translation'] = translation
+            transforms.append(arr)
+
+    return np.hstack(transforms)

@@ -1,7 +1,7 @@
 *.blend1
 __pycache__/*
 .vscode/*
-./*.zip
+molecularnodes_*.zip
 *.pyc
 .Rproj.user
 /.quarto/
@@ -14,7 +14,13 @@ coverage.xml
 logs/
 *.log
 .luarc.json
-
-/.luarc.json
 dist
 poetry.lock
+*.lock
+*.DS_Store
+.mda_session
+*.vdb
+docs/nodes/*.qmd
+!docs/nodes/index.qmd
+
+

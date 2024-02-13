@@ -2,50 +2,55 @@ import bpy
 import os
 import pytest
 import molecularnodes as mn
-from molecularnodes.mda import HAS_mda
+from . import utils
+from molecularnodes.io.md import HAS_mda
 
 if HAS_mda:
     import MDAnalysis as mda
 import numpy as np
 from .constants import (
-    test_data_directory
+    data_dir
 )
-from .utils import get_verts, apply_mods, remove_all_molecule_objects
+from .utils import (
+    get_verts,
+    remove_all_molecule_objects,
+    sample_attribute,
+    sample_attribute_to_string
+)
+
 
 @pytest.mark.skipif(not HAS_mda, reason="MDAnalysis is not installed")
 class TestMDA:
     @pytest.fixture(scope="module")
     def mda_session(self):
-        mda_session = mn.mda.MDAnalysisSession()
+        mda_session = mn.io.MDAnalysisSession()
         return mda_session
 
     @pytest.fixture(scope="module")
     def universe(self):
-        top = test_data_directory / "md_ppr/box.gro"
-        traj = test_data_directory / "md_ppr/first_5_frames.xtc"
+        top = data_dir / "md_ppr/box.gro"
+        traj = data_dir / "md_ppr/first_5_frames.xtc"
         u = mda.Universe(top, traj)
         return u
 
     @pytest.fixture(scope="module")
     def universe_with_bonds(self):
-        top = test_data_directory / "md_ppr/md.tpr"
-        traj = test_data_directory / "md_ppr/md.gro"
+        top = data_dir / "md_ppr/md.tpr"
+        traj = data_dir / "md_ppr/md.gro"
         u = mda.Universe(top, traj)
         return u
 
     def test_persistent_handlers_added(self, mda_session):
         assert bpy.app.handlers.load_post[-1].__name__ == "_rejuvenate_universe"
-        assert bpy.app.handlers.save_pre[-1].__name__ == "_sync_universe"
+        assert bpy.app.handlers.save_post[-1].__name__ == "_sync_universe"
 
     def test_create_mda_session(self, mda_session):
         assert mda_session is not None
-        assert mda_session.uuid is not None
         assert mda_session.world_scale == 0.01
 
     def reload_mda_session(self, mda_session):
         with pytest.warns(UserWarning, match="The existing mda session"):
             mda_session_2 = mn.mda.create_session()
-        assert mda_session.uuid == mda_session_2.uuid
 
     @pytest.mark.parametrize("in_memory", [False, True])
     def test_show_universe(self, snapshot, in_memory, mda_session, universe):
@@ -98,20 +103,16 @@ class TestMDA:
 
     @pytest.mark.parametrize("in_memory", [False, True])
     def test_include_bonds(self, in_memory, mda_session, universe_with_bonds):
-        remove_all_molecule_objects(mda_session)
-        mda_session.show(universe_with_bonds, in_memory=in_memory, include_bonds=False)
-        obj = bpy.data.objects["atoms"]
-        assert obj.data.edges.items() == []
 
         remove_all_molecule_objects(mda_session)
-        mda_session.show(universe_with_bonds, in_memory=in_memory, include_bonds=True)
+        mda_session.show(universe_with_bonds, in_memory=in_memory)
         obj = bpy.data.objects["atoms"]
         assert obj.data.edges.items() != []
 
     @pytest.mark.parametrize("in_memory", [False, True])
     def test_attributes_added(self, in_memory, mda_session, universe):
         remove_all_molecule_objects(mda_session)
-        mda_session.show(universe, in_memory=in_memory, include_bonds=False)
+        mda_session.show(universe, in_memory=in_memory)
         obj = bpy.data.objects["atoms"]
         attributes = obj.data.attributes.keys()
         # check if all attributes are added.
@@ -136,38 +137,78 @@ class TestMDA:
             assert att in attributes
 
     @pytest.mark.parametrize("in_memory", [False, True])
-    def test_trajectory_update(self, snapshot, in_memory, mda_session, universe):
-        remove_all_molecule_objects(mda_session)
-        mda_session.show(universe, in_memory=in_memory)
-        obj = bpy.data.objects["atoms"]
+    def test_trajectory_update(self, snapshot, in_memory, universe):
 
-        verts_frame_0 = get_verts(obj, apply_modifiers=False)
-        snapshot.assert_match(verts_frame_0, "md_gro_xtc_verts_frame_0.txt")
+        # remove_all_molecule_objects(mda_session)
+        mda_session = mn.io.MDAnalysisSession()
 
-        # change blender frame to 1
-        bpy.context.scene.frame_set(1)
-        obj = bpy.data.objects["atoms"]
-        verts_frame_1 = get_verts(obj, apply_modifiers=False)
-        snapshot.assert_match(verts_frame_1, "md_gro_xtc_verts_frame_1.txt")
+        obj = mda_session.show(universe, in_memory=in_memory, style='ribbon')
+        node = mn.blender.nodes.get_style_node(obj)
+        group = obj.modifiers['MolecularNodes'].node_group
+        if in_memory:
+            node = group.nodes['MN_animate_value']
+            node.inputs['Frame: Start'].default_value = 0
+            node.inputs['Frame: End'].default_value = 4
 
-        assert verts_frame_0 != verts_frame_1
+        if 'EEVEE' in node.inputs.keys():
+            node.inputs['EEVEE'].default_value = True
+
+        if in_memory:
+            mn.blender.nodes.realize_instances(obj)
+
+        n = 100
+        prec = 3
+        thresh = n * 4
+
+        pos_a = sample_attribute(obj, 'position', n=n, evaluate=in_memory)
+        snapshot.assert_match(
+            np.array2string(pos_a, precision=prec, threshold=thresh),
+            "md_gro_xtc_verts_frame_0.txt"
+        )
+
+        # change blender frame to 4
+        next_frame = 200 if in_memory else 4
+        bpy.context.scene.frame_set(next_frame)
+
+        # if in_memory:
+        #     socket.default_value = 250
+        pos_b = sample_attribute(obj, 'position', n=n, evaluate=in_memory)
+        snapshot.assert_match(
+            np.array2string(pos_b, precision=prec, threshold=thresh),
+            "md_gro_xtc_verts_frame_1.txt"
+        )
+
+        assert not np.isclose(pos_a, pos_b).all()
 
     @pytest.mark.parametrize("in_memory", [False, True])
     def test_show_updated_atoms(self, snapshot, in_memory, mda_session, universe):
         remove_all_molecule_objects(mda_session)
         updating_ag = universe.select_atoms("around 5 resid 1", updating=True)
-        mda_session.show(updating_ag, in_memory=in_memory)
+        mda_session.show(updating_ag, in_memory=in_memory, style='vdw')
 
         obj = bpy.data.objects["atoms"]
+        nodes = obj.modifiers['MolecularNodes'].node_group.nodes
+        for node in nodes:
+            for input in node.inputs:
+                if input.name == "Frame: Start":
+                    input.default_value = 0
+                elif input.name == "Frame: End":
+                    input.default_value = 4
+                elif input.name == "To Max":
+                    input.default_value = 4
+                elif input.name == "EEVEE":
+                    input.default_value = True
 
-        verts_frame_0 = get_verts(obj, apply_modifiers=False)
+        mn.blender.nodes.realize_instances(obj)
+
+        verts_frame_0 = get_verts(obj, apply_modifiers=True)
         snapshot.assert_match(verts_frame_0, "md_gro_xtc_verts_frame_0.txt")
 
         # change blender frame to 1
         bpy.context.scene.frame_set(1)
         print(mda_session.rep_names)
         obj = bpy.data.objects["atoms"]
-        verts_frame_1 = get_verts(obj, apply_modifiers=False)
+        verts_frame_1 = get_verts(obj, apply_modifiers=True)
         snapshot.assert_match(verts_frame_1, "md_gro_xtc_verts_frame_1.txt")
 
         assert verts_frame_0 != verts_frame_1
@@ -198,7 +239,7 @@ class TestMDA:
         # save
         bpy.ops.wm.save_as_mainfile(filepath=str(tmp_path / "test.blend"))
 
-        assert os.path.exists(f"{mda_session.session_tmp_dir}/{mda_session.uuid}.pkl")
+        assert os.path.exists(str(tmp_path / "test.mda_session"))
 
         # reload
         remove_all_molecule_objects(mda_session)
@@ -212,3 +253,133 @@ class TestMDA:
         snapshot.assert_match(verts_frame_1, "md_gro_xtc_verts_frame_1.txt")
 
         assert verts_frame_0 != verts_frame_1
+
+
+@pytest.mark.skipif(not HAS_mda, reason="MDAnalysis is not installed")
+class TestMDA_FrameMapping:
+    @pytest.fixture(scope="module")
+    def mda_session(self):
+        mda_session = mn.io.MDAnalysisSession()
+        return mda_session
+
+    @pytest.fixture(scope="module")
+    def universe(self):
+        top = data_dir / "md_ppr/box.gro"
+        traj = data_dir / "md_ppr/first_5_frames.xtc"
+        u = mda.Universe(top, traj)
+        return u
+
+    @pytest.fixture(scope="module")
+    def universe_with_bonds(self):
+        top = data_dir / "md_ppr/md.tpr"
+        traj = data_dir / "md_ppr/md.gro"
+        u = mda.Universe(top, traj)
+        return u
+
+    def test_persistent_handlers_added(self, mda_session):
+        assert bpy.app.handlers.load_post[-1].__name__ == "_rejuvenate_universe"
+        assert bpy.app.handlers.save_post[-1].__name__ == "_sync_universe"
+
+    def test_create_mda_session(self, mda_session):
+        assert mda_session is not None
+        assert mda_session.world_scale == 0.01
+
+    def reload_mda_session(self, mda_session):
+        with pytest.warns(UserWarning, match="The existing mda session"):
+            mda_session_2 = mn.mda.create_session()
+
+    def test_frame_mapping(self, mda_session, universe):
+        remove_all_molecule_objects(mda_session)
+        obj = mda_session.show(universe, frame_mapping=[0, 0, 1, 2, 4])
+
+        bpy.context.scene.frame_set(0)
+        verts_a = utils.sample_attribute(obj, 'position')
+
+        bpy.context.scene.frame_set(1)
+        verts_b = utils.sample_attribute(obj, 'position')
+        # test the frame mapping works, that nothing has changed becuase of the mapping
+        assert np.isclose(verts_a, verts_b).all()
+
+        bpy.context.scene.frame_set(2)
+        verts_b = utils.sample_attribute(obj, 'position')
+        # test that something has now changed
+        assert not np.isclose(verts_a, verts_b).all()
+
+    def test_subframes(self, mda_session, universe):
+        remove_all_molecule_objects(mda_session)
+        mda_session.show(universe)
+
+        obj = bpy.data.objects["atoms"]
+        bpy.context.scene.frame_set(0)
+        verts_a = utils.sample_attribute(obj, 'position')
+
+        bpy.context.scene.frame_set(1)
+        verts_b = utils.sample_attribute(obj, 'position')
+        # should be no difference because not using subframes
+        assert not np.isclose(verts_a, verts_b).all()
+
+        for subframes in [1, 2, 3, 4]:
+            frame = 1
+            fraction = frame % (subframes + 1) / (subframes + 1)
+            obj.mn['subframes'] = subframes
+            bpy.context.scene.frame_set(frame)
+            verts_c = utils.sample_attribute(obj, 'position')
+            # now using subframes, there should be a difference
+            assert not np.isclose(verts_b, verts_c).all()
+
+            assert np.isclose(verts_c, mn.utils.lerp(
+                verts_a, verts_b, t=fraction)).all()
+
+    def test_subframe_mapping(self, mda_session, universe):
+        remove_all_molecule_objects(mda_session)
+        mda_session.show(universe, in_memory=False,
+                         frame_mapping=[0, 0, 1, 2, 3])
+
+        obj = bpy.data.objects["atoms"]
+        bpy.context.scene.frame_set(0)
+        verts_a = utils.sample_attribute(obj, 'position')
+
+        bpy.context.scene.frame_set(1)
+        verts_b = utils.sample_attribute(obj, 'position')
+        assert np.isclose(verts_a, verts_b).all()
+
+        bpy.context.scene.frame_set(2)
+        verts_b = utils.sample_attribute(obj, 'position')
+        assert not np.isclose(verts_a, verts_b).all()
+
+        obj.mn['subframes'] = 1
+        bpy.context.scene.frame_set(3)
+        verts_c = utils.sample_attribute(obj, 'position')
+
+        assert not np.isclose(verts_b, verts_c).all()
+        assert np.isclose(verts_c, mn.utils.lerp(verts_a, verts_b, 0.5)).all()
+
+
+@pytest.mark.parametrize("toplogy", ["pent/prot_ion.tpr", "pent/TOPOL2.pdb"])
+def test_martini(snapshot, toplogy):
+    session = mn.io.MDAnalysisSession()
+    remove_all_molecule_objects(session)
+    universe = mda.Universe(
+        data_dir / "martini" / toplogy,
+        data_dir / "martini/pent/PENT2_100frames.xtc"
+    )
+
+    mol = session.show(universe, style="ribbon")
+
+    pos_a = sample_attribute(mol, 'position')
+    bpy.context.scene.frame_set(3)
+    pos_b = sample_attribute(mol, 'position')
+
+    assert not np.isclose(pos_a, pos_b).all()
+
+    for att in mol.data.attributes.keys():
+        snapshot.assert_match(
+            sample_attribute(mol, att, as_string=True),
+            f"mesh_att_{att}_values.txt"
+        )
+
+    for att in mol.data.attributes.keys():
+        snapshot.assert_match(
+            sample_attribute(mol, att, as_string=True),
+            f"ribbon_att_{att}_values.txt"
+        )

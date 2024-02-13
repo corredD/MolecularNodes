@@ -1,64 +1,76 @@
 import bpy
 import pytest
 import molecularnodes as mn
+from .utils import evaluate
 from .constants import (
-    test_data_directory
+    data_dir,
+    codes
 )
-from molecularnodes.mda import HAS_mda
-
+from molecularnodes.io.md import HAS_mda
 
 if HAS_mda:
     import MDAnalysis as mda
-from .utils import get_verts
+from .utils import sample_attribute_to_string
 
 # register the operators, which isn't done by default when loading bpy
 # just via headless float_decimals
+mn.unregister()
 mn.register()
 
-def compare_op_api(code, style = "atoms", apply = True, float_decimals = 3):
-    bpy.context.scene.MN_pdb_code = code
-    bpy.context.scene.MN_import_default_style = style
-    
-    bpy.ops.mn.import_protein_rcsb()
-    obj_1 = bpy.data.objects[code]
-    obj_2 = mn.load.molecule_rcsb(code, starting_style=style)
-    
-    v1 = get_verts(obj_1, apply_modifiers=apply, float_decimals=float_decimals)
-    v2 = get_verts(obj_2, apply_modifiers=apply, float_decimals=float_decimals)
-    return  v1 == v2
 
-@pytest.mark.parametrize("code", ['6N2Y', '4OZS', '1CD3', '8H1B'])
-def test_op_api_cartoon(code):
-    assert compare_op_api(code, style = "cartoon")
+@pytest.mark.parametrize("code", codes)
+def test_op_api_cartoon(snapshot, code, style='ribbon', format="mmtf"):
+    scene = bpy.context.scene
+    scene.MN_import_node_setup = True
+    scene.MN_pdb_code = code
+    scene.MN_import_style = style
+    scene.MN_import_node_setup = True
+    scene.MN_import_build_assembly = False
+    scene.MN_import_centre = False
+    scene.MN_import_del_solvent = False
+    scene.MN_import_format_download = format
+
+    bpy.ops.mn.import_wwpdb()
+
+    obj_1 = bpy.context.active_object
+    obj_2 = mn.io.fetch(code, style=style, format=format).object
+
+    # objects being imported via each method should have identical snapshots
+    for obj in [obj_1, obj_2]:
+        for name in obj.data.attributes.keys():
+            if name == "sec_struct" or name.startswith("."):
+                continue
+            snapshot.assert_match(
+                sample_attribute_to_string(object, name, evaluate=True),
+                f"{name}.txt"
+            )
+
 
 def test_op_api_mda(snapshot):
-    topo = str(test_data_directory / "md_ppr/box.gro")
-    traj = str(test_data_directory / "md_ppr/first_5_frames.xtc")
+    topo = str(data_dir / "md_ppr/box.gro")
+    traj = str(data_dir / "md_ppr/first_5_frames.xtc")
     name = bpy.context.scene.MN_import_md_name
-    
-    bpy.context.scene.MN_import_md_topology  = topo
-    bpy.context.scene.MN_import_md_trajectory  = traj
-    
+
+    bpy.context.scene.MN_import_md_topology = topo
+    bpy.context.scene.MN_import_md_trajectory = traj
+    bpy.context.scene.MN_import_style = 'ribbon'
+
     bpy.ops.mn.import_protein_md()
-    
-    # assert no frames collection created
-    assert not bpy.data.collections.get(f"frames_{name}")
-    
-    obj = bpy.data.objects[name]
-    verts = get_verts(obj, apply_modifiers=False, float_decimals=3)
-    snapshot.assert_match(verts, "md_ops_gro_frame_1.txt")
-    
+    obj_1 = bpy.context.active_object
+    assert obj_1.name == name
+    assert not bpy.data.collections.get(f"{name}_frames")
+
     bpy.context.scene.MN_md_in_memory = True
-    
     name = 'NewTrajectoryInMemory'
-    bpy.context.scene.MN_import_md_name = name
-    bpy.context.scene.MN_import_default_style = "ribbon"
-    bpy.ops.mn.import_protein_md()
-    
-    obj = bpy.data.objects[name]
-    frames_coll = bpy.data.collections[f"{name}_frames"]
-    verts = get_verts(obj, apply_modifiers=True, float_decimals=3)
-    
-    assert frames_coll
-    assert len(frames_coll.objects) == 5
-    snapshot.assert_match(verts, "md_ops_gro_frame_1_ribbon.txt")
+
+    obj_2, universe = mn.io.md.load(topo, traj, name="test", style='ribbon')
+    frames_coll = bpy.data.collections.get(f"{obj_2.name}_frames")
+
+    assert not frames_coll
+
+    for mol in [obj_1, obj_2]:
+        for att in mol.data.attributes.keys():
+            snapshot.assert_match(
+                sample_attribute_to_string(mol, att),
+                f"{att}.txt"
+            )

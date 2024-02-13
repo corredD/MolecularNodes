@@ -15,9 +15,8 @@ jobs:
       max-parallel: 4
       fail-fast: false
       matrix:
-        blender-version: ["3.6.0"]
-        os: [ubuntu-latest, windows-latest, macos-13]
-        # os: [ubuntu-latest]
+        blender-version: ["4.0.0"]
+        os: [ubuntu-latest, windows-latest, macos-13, macos-14]
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
@@ -25,19 +24,21 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
       - run: pip install bpy==${{ matrix.blender-version }}
-      # - run: pip install -r requirements.txt
-      - name: Install molecularnodes + dependencies
-        run: pip install poetry
       - name: Install
-        run: poetry install --with=dev
-      - name: install
-        run: pip install -r requirements.txt
+        run: |
+          pip install poetry
+          poetry install --with=dev
       
-      # - name: Install MolecularNodes
-        # run: pip install .
-
+      - name: Install pyopenvdb
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd $(poetry run python -c "import os; import bpy; print(os.path.dirname(bpy.__file__)+'/../../../../../')")
+          svn export https://svn.blender.org/svnroot/bf-blender/trunk/lib/linux_x86_64_glibc_228/python/lib/python3.10/site-packages/pyopenvdb.so@r63589
+          pip install patchelf
+          patchelf --set-rpath '$ORIGIN/bpy/lib' pyopenvdb.so
+          
       - name: Run Tests
-        run: pytest --verbose --cov=molecularnodes --cov-report=xml:coverage.xml
+        run: poetry run python -m pytest --verbose --cov=molecularnodes --cov-report=xml:coverage.xml --ignore=molecularnodes/ui/panel.py
 
       - name: Expose coverage as a CI download # Related to test_addon_blender_advanced.py
         uses: actions/upload-artifact@v1
