@@ -1,8 +1,9 @@
 import bpy
 from .star import StarFile
-
+from .tbl import TBLFile
 from .cellpack import CellPack
 
+# Star file loading
 bpy.types.Scene.MN_import_star_file_path = bpy.props.StringProperty(
     name="File",
     description="File path for the `.star` file to import.",
@@ -57,6 +58,74 @@ def panel_starfile(layout, scene):
     row_import.operator("mn.import_star_file")
 
 
+# TBL loading
+bpy.types.Scene.MN_import_tbl_file_path = bpy.props.StringProperty(
+    name="File",
+    description="File path for the `.tbl` file to import.",
+    subtype="FILE_PATH",
+    maxlen=0,
+)
+bpy.types.Scene.MN_import_tbl_file_name = bpy.props.StringProperty(
+    name="Name",
+    description="Name of the created object.",
+    default="NewTBLInstances",
+    maxlen=0,
+)
+bpy.types.Scene.MN_import_tbl_pixel_size = bpy.props.FloatProperty(
+    name="Pixel Size",
+    description="Pixel size of the TBL file.",
+    default=1.0,
+)
+
+
+def load_tblfile(
+        file_path,
+        name="NewTBLInstances",
+        pixel_size=1.0,
+        node_setup=True,
+        world_scale=0.01
+        ):
+    ensemble = TBLFile.from_tblfile(file_path, pixel_size=pixel_size)
+    ensemble.create_object(name=name,
+                           node_setup=node_setup,
+                           world_scale=world_scale)
+    return ensemble
+
+
+class MN_OT_Import_TBL_File(bpy.types.Operator):
+    bl_idname = "mn.import_tbl_file"
+    bl_label = "Load"
+    bl_description = (
+        "Will import the given file, setting up the points to instance an object."
+    )
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        scene = context.scene
+        load_tblfile(
+            file_path=scene.MN_import_tbl_file_path,
+            name=scene.MN_import_tbl_file_name,
+            pixel_size=scene.MN_import_tbl_pixel_size,
+            node_setup=True,
+        )
+        return {"FINISHED"}
+
+
+def panel_tblfile(layout, scene):
+    layout.label(text="Load TBL File", icon="FILE_TICK")
+    layout.separator()
+    row_import = layout.row()
+    row_import.prop(scene, "MN_import_tbl_file_name")
+    layout.prop(scene, "MN_import_tbl_file_path")
+    layout.prop(scene, "MN_import_tbl_pixel_size")
+    row_import.operator("mn.import_tbl_file")
+
+
+# CellPack loading
 bpy.types.Scene.mol_import_cell_pack_path = bpy.props.StringProperty(
     name="File",
     description="File to import (.cif, .bcif)",

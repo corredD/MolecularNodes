@@ -260,6 +260,21 @@ def get_star_node(object):
     return star_node(group)
 
 
+def tbl_node(group):
+    prev = previous_node(get_output(group))
+    is_star_node = "TBL Instances" in prev.name
+    while not is_star_node:
+        prev = previous_node(prev)
+        is_star_node = "TBL Instances" in prev.name
+    return prev
+
+
+def get_tbl_node(object):
+    "Walk back through the primary node connections until you find the first style node"
+    group = object.modifiers["MolecularNodes"].node_group
+    return tbl_node(group)
+
+
 def get_color_node(object):
     "Walk back through the primary node connections until you find the first style node"
     group = object.modifiers["MolecularNodes"].node_group
@@ -488,6 +503,27 @@ def create_starting_nodes_starfile(object, n_images=1):
     node_input.location = [0, 0]
     node_output.location = [700, 0]
     node_star_instances = add_custom(group, "Starfile Instances", [450, 0])
+    link(node_star_instances.outputs[0], node_output.inputs[0])
+    link(node_input.outputs[0], node_star_instances.inputs[0])
+
+
+def create_starting_nodes_tblfile(object, n_images=1):
+    # ensure there is a geometry nodes modifier called 'MolecularNodes' that is created and applied to the object
+    node_mod = get_mod(object)
+
+    node_name = f"MN_tbl_{object.name}"
+
+    # create a new GN node group, specific to this particular molecule
+    group = new_group(node_name)
+    node_mod.node_group = group
+    link = group.links.new
+
+    # move the input and output nodes for the group
+    node_input = get_input(group)
+    node_output = get_output(group)
+    node_input.location = [0, 0]
+    node_output.location = [700, 0]
+    node_star_instances = add_custom(group, "TBL Instances", [450, 0])
     link(node_star_instances.outputs[0], node_output.inputs[0])
     link(node_input.outputs[0], node_star_instances.inputs[0])
 

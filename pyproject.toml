@@ -19,6 +19,7 @@ mrcfile = "==1.4.3"
 starfile = "==0.5.6"
 pillow = "==10.2.0"
 msgpack = "==1.0.7"
+dynamotable = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = "*"

@@ -94,6 +94,9 @@ class StarFile(Ensemble):
             if all([col in df.columns for col in shift_column_names]):
                 shifts_ang = df[shift_column_names].to_numpy()
                 self.positions -= shifts_ang
+            # *   The first rotation is called ``rlnAngleRot`` and is around the Z-axis.
+            # *   The second rotation is called ``rlnAngleTilt`` and is around the new Y-axis.
+            # *   The third rotation is called ``rlnAnglePsi`` and is around the new Z axis.
             df["MNAnglePhi"] = df["rlnAngleRot"]
             df["MNAngleTheta"] = df["rlnAngleTilt"]
             df["MNAnglePsi"] = df["rlnAnglePsi"]
@@ -103,12 +106,13 @@ class StarFile(Ensemble):
                     df["rlnMicrographName"].astype("category").cat.codes.to_numpy()
                 )
             except KeyError:
-                try:
-                    df["MNImageId"] = (
-                        df["rlnTomoName"].astype("category").cat.codes.to_numpy()
-                    )
-                except KeyError:
-                    df["MNImageId"] = 0.0
+                df["MNImageId"] = 0.0
+                # try:
+                #     df["MNImageId"] = (
+                #         df["rlnTomoName"].astype("category").cat.codes.to_numpy()
+                #     )
+                # except KeyError:
+                #     df["MNImageId"] = 0.0
 
             self.data = df
 
