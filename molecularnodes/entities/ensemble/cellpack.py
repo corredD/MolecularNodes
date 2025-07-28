@@ -28,9 +28,12 @@ class CellPack(Ensemble):
         self.color_entity = {}
         if os.path.exists(self.color_palette):
             self.color_palette = json.load(open(self.color_palette, "r"))
+        print("Color Palette", self.color_palette)
         for entity in np.unique(self.array.entity_id):
-            ename = self.data.entities[entity]
+            ename = self.data.entities[entity].split(".")[-1]
+            print("Found Entity", entity, ename)
             if ename in self.color_palette:
+                print("Found Entity", entity, ename)
                 self.color_entity[entity] = np.array(
                     [
                         self.color_palette[ename]["x"] / 255.0,
@@ -41,6 +44,7 @@ class CellPack(Ensemble):
                 )
             else:
                 self.color_entity[entity] = color.random_rgb(int(entity))
+            print("Entity", entity, self.color_entity[entity])
         for i, entity in enumerate(self.entity_ids):
             symids = self.array.asym_id[self.array.entity_id == entity]
             self.entity_chains[entity] = np.unique(symids)
@@ -120,13 +124,16 @@ class CellPack(Ensemble):
             # random color per chain
             # could also do by entity, + chain-lighten + atom-lighten
             entity = chain_atoms.entity_id[0]
+            print("Entity", entity, chain)
             color_entity = self.color_entity[entity]
             # color.random_rgb(int(entity))
             # lighten for each chain
             nc = len(self.entity_chains[entity])
             ci = np.where(self.entity_chains[entity] == chain)[0][0] * 2
-            color_chain = color.Lab.lighten_color(color_entity, (float(ci) / nc))
-            colors = np.tile(color_chain, (len(chain_atoms), 1))
+            color_chain = (
+                color_entity  # color.Lab.lighten_color(color_entity, (float(ci) / nc))
+            )
+            colors = np.tile(color_entity, (len(chain_atoms), 1))
             bl.mesh.store_named_attribute(
                 model,
                 name="Color",

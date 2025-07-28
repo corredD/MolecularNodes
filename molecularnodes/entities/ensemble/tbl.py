@@ -58,16 +58,20 @@ class TBLFile(Ensemble):
     def _create_mn_columns(self):
         df = self.data
         # get necessary info from dataframes
-        self.positions = np.column_stack([
-            df.x.values, df.y.values, df.z.values])
+        # 24  : x             x coordinate in original volume
+        # 25  : y             y coordinate in original volume
+        # 26  : z             z coordinate in original volume
+        self.positions = np.column_stack([df.x.values, df.y.values, df.z.values])
         pixel_size = self.pixel_size
+        # 4   : dx            x shift from center (in pixels)
+        # 5   : dy            y shift from center (in pixels)
+        # 6   : dz            z shift from center (in pixels)
+        dx = np.column_stack([df.dx.values, df.dy.values, df.dz.values])
+        self.positions += dx / pixel_size
         self.positions = self.positions * pixel_size
-        dx =  np.column_stack([
-            df.dx.values, df.dy.values, df.dz.values])
-        self.positions += dx
-        # 7   : tdrot         euler angle (rotation around z, in degrees)
-        # 8   : tilt          euler angle (rotation around new x, in degrees)
-        # 9   : narot         euler angle (rotation around new z, in degrees)        
+        # 7   : tdrot         euler angle (rotation clockwise around z, in degrees), (for tilt direction gets rotated)
+        # 8   : tilt          euler angle (rotation clockwise around new x, in degrees)
+        # 9   : narot         euler angle (rotation clockwise around new z, in degrees), (for new azymuthal rotation)
         df["MNAnglePhi"] = df.tdrot
         df["MNAngleTheta"] = df.tilt
         df["MNAnglePsi"] = df.narot
