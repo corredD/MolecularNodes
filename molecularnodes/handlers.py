@@ -58,7 +58,12 @@ def render_pre_handler(scene: bpy.types.Scene) -> None:
     session: MNSession = scene.MNSession  # type: ignore
     if len(session.entities) == 0:
         return
-    if not any([len(e.annotations) for e in session.entities.values()]):
+    if not any(
+        hasattr(entity, "annotations")
+        and getattr(entity, "annotations") is not None
+        and len(entity.annotations)
+        for entity in session.entities.values()
+    ):
         return
 
     # frame_change_pre is supposed to be called before render_pre
