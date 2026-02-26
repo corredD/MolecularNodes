@@ -33,7 +33,7 @@ class PDBXReader(ReaderBase):
     ) -> struc.AtomArray | struc.AtomArrayStack:
         try:
             array = pdbx.get_structure(
-                self.file, model=model, extra_fields=self._extra_fields
+                self.file, model=model, extra_fields=self._extra_fields, use_author_fields=False
             )
         except InvalidFileError:
             array = pdbx.get_component(self.file)

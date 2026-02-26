@@ -92,7 +92,7 @@ class CellPackReader(PDBXReader):
 
         if "PDB_model_num" in self.blocks["pdbx_struct_assembly_gen"]:
             self._is_petworld = True
-
+            print("This CellPack file appears to be from PETWORLD, setting _is_petworld to True")
         molecules = {}
 
         try:

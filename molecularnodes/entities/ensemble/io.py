@@ -16,12 +16,14 @@ def load_cellpack(
     file_path,
     name="NewCellPackModel",
     node_setup=True,
-    world_scale=0.01,
-    fraction: float = 1,
+    fraction: float = 0.1,
 ):
-    ensemble = CellPack(file_path)
-    ensemble.create_object(
-        name=name, node_setup=node_setup, world_scale=world_scale, fraction=fraction
+    # CellPack builds its Blender objects during initialization. Respect the
+    # import options here so the instanced molecule objects get renderable GN styles.
+    ensemble = CellPack(
+        file_path,
+        name=name,
+        node_setup=node_setup,
+        fraction=fraction,
     )
-
     return ensemble
