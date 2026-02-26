@@ -26,7 +26,6 @@ class CellPack(Ensemble):
         self._entity_type = EntityType.ENSEMBLE_CELLPACK
         self.file_type = self._file_type()
         self.file = CellPackReader(file_path)
-        self.file.get_molecules()
         self.transformations = self.file.get_assemblies()
         self.color_entity = {}
         self._color_palette_path = Path(file_path).parent / "color_palette.json"

@@ -52,7 +52,7 @@ class CellPackReader(PDBXReader):
         self._extra_fields = ["b_factor", "occupancy", "atom_id"]
         self.file_path = file_path
         self.file = self.read(file_path)
-        self.n_molecules: int = pdbx.get_model_count(self.file)
+        self.n_molecules: int | None = None
         self.molecules: dict[str, struc.AtomArray] = self.get_molecules()
 
     @property
@@ -109,6 +109,8 @@ class CellPackReader(PDBXReader):
 
         except InvalidFileError:
             self._is_petworld = True
+            if self.n_molecules is None:
+                self.n_molecules = pdbx.get_model_count(self.file)
             for i in range(self.n_molecules):
                 # Skip bond computation for CellPack files
                 array = self.get_structure(model=int(i + 1), include_bonds=False)
