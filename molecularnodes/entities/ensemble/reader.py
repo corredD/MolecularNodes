@@ -57,7 +57,7 @@ class CellPackReader(PDBXReader):
 
     @property
     def mol_ids(self) -> np.ndarray:
-        return np.unique(list(self.molecules.keys()))
+        return np.asarray(list(self.molecules.keys()), dtype=str)
 
     def read(self, file_path):
         suffix = Path(file_path).suffix
@@ -92,7 +92,7 @@ class CellPackReader(PDBXReader):
 
         if "PDB_model_num" in self.blocks["pdbx_struct_assembly_gen"]:
             self._is_petworld = True
-            print("This CellPack file appears to be from PETWORLD, setting _is_petworld to True")
+            print("CellPackReader: detected PETWORLD assembly metadata")
         molecules = {}
 
         try:

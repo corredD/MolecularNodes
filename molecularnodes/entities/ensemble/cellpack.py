@@ -30,10 +30,10 @@ class CellPack(Ensemble):
         self.color_entity = {}
         self._color_palette_path = Path(file_path).parent / "color_palette.json"
         object_name = name if name is not None else f"{Path(file_path).name}"
+        self._create_object_instances(name=object_name, node_setup=node_setup)
         self.object = self._create_data_object(name=object_name)
         self.object.mn.entity_type = self._entity_type.value
-        self._create_object_instances(name=self.object.name, node_setup=node_setup)
-        self._sync_data_object_chain_id_to_collection_order()
+        self._debug_instance_collection_order()
         self._setup_node_tree(fraction=fraction, as_points=as_points)
         # self._setup_colors()
 
@@ -61,8 +61,30 @@ class CellPack(Ensemble):
         return Path(self.file_path).suffix.strip(".")
 
     @staticmethod
+    def _debug_print_rows(title: str, rows: list[str], limit: int = 25) -> None:
+        print(title)
+        for row in rows[:limit]:
+            print(f"  {row}")
+        if len(rows) > limit:
+            print(f"  ... {len(rows) - limit} more")
+
+    @classmethod
+    def _debug_print_items(cls, title: str, items, limit: int = 25) -> None:
+        rows = [f"[{idx}] {item}" for idx, item in enumerate(list(items))]
+        cls._debug_print_rows(title, rows, limit=limit)
+
+    @staticmethod
+    def _hide_source_chain_object(obj: bpy.types.Object) -> None:
+        # Keep source chains available for instancing, but out of view.
+        try:
+            obj.hide_set(True)
+        except RuntimeError:
+            pass
+        obj.hide_render = True
+
+    @staticmethod
     def _blender_name_sort_key(name: str):
-        # Approximate Blender UI/GN ID ordering: case-insensitive natural sort.
+        # Match Collection Info + Pick Instance ordering for child objects.
         parts = re.split(r"(\d+)", str(name))
         key = []
         for part in parts:
@@ -80,12 +102,14 @@ class CellPack(Ensemble):
 
         all_mol_ids = np.asarray(self.file.mol_ids).astype(str)
         transform_chain_ids = np.asarray(self.transformations["chain_id"]).astype(str)
-        transform_chain_ids_unique = np.unique(transform_chain_ids)
+        transform_chain_id_set = set(transform_chain_ids.tolist())
         molecule_lookup = {str(mol_id) for mol_id in self.molecules.keys()}
 
-        instance_mol_ids = np.array(
-            [chain_id for chain_id in transform_chain_ids_unique if chain_id in molecule_lookup]
-        ).astype(str)
+        # Keep the collection order identical to the object creation order.
+        instance_mol_ids = np.asarray(
+            [mol_id for mol_id in all_mol_ids if mol_id in transform_chain_id_set],
+            dtype=str,
+        )
 
         if len(instance_mol_ids) == 0:
             # Some formats (e.g. PETWORLD variants) can use a different naming scheme
@@ -105,7 +129,7 @@ class CellPack(Ensemble):
 
         missing_molecule_ids = [
             chain_id
-            for chain_id in transform_chain_ids_unique
+            for chain_id in sorted(transform_chain_id_set)
             if chain_id not in molecule_lookup
         ]
         if missing_molecule_ids:
@@ -116,6 +140,81 @@ class CellPack(Ensemble):
 
         self._instance_mol_ids_cache = instance_mol_ids
         return self._instance_mol_ids_cache
+
+    def _instance_ids_for_mapping(self) -> np.ndarray:
+        if hasattr(self, "_instance_collection_name"):
+            collection_ids = np.asarray(
+                [obj.name for obj in self.instance_collection.objects]
+            ).astype(str)
+        else:
+            collection_ids = self._instance_mol_ids_for_collection()
+
+        return np.asarray(
+            sorted(collection_ids.tolist(), key=self._blender_name_sort_key),
+            dtype=str,
+        )
+
+    def _transform_instance_indices(self) -> tuple[np.ndarray, np.ndarray]:
+        instance_mol_ids = self._instance_ids_for_mapping()
+
+        # Convert transform keys into collection slot indices before GN sees them.
+        if self.file._is_petworld:
+            transform_model_nums = np.asarray(self.transformations["pdb_model_num"]).astype(int)
+            model_num_lookup = {}
+            rows = []
+            for idx, mol_id in enumerate(instance_mol_ids):
+                model_num = int(np.asarray(self.molecules[mol_id].pdb_model_num).astype(int)[0])
+                if model_num in model_num_lookup:
+                    raise ValueError(
+                        "CellPack PETWORLD molecules share the same model number: "
+                        f"{model_num}"
+                    )
+                model_num_lookup[model_num] = idx
+                rows.append(f"model {model_num} -> slot[{idx}] {mol_id}")
+
+            self._debug_print_rows(
+                "CellPack PETWORLD model_num -> instance slot",
+                rows,
+            )
+
+            missing_model_nums = sorted(
+                {int(model_num) for model_num in transform_model_nums if model_num not in model_num_lookup}
+            )
+            if missing_model_nums:
+                raise ValueError(
+                    "CellPack PETWORLD transform rows reference missing model numbers: "
+                    f"{missing_model_nums}"
+                )
+
+            chain_id_int = np.array(
+                [model_num_lookup[int(model_num)] for model_num in transform_model_nums],
+                dtype=int,
+            )
+            return chain_id_int, instance_mol_ids
+
+        transform_chain_ids = np.asarray(self.transformations["chain_id"]).astype(str)
+        chain_id_lookup = {
+            chain_name: idx for idx, chain_name in enumerate(instance_mol_ids.tolist())
+        }
+        self._debug_print_rows(
+            "CellPack chain_id -> instance slot",
+            [f"{chain_name} -> slot[{idx}]" for chain_name, idx in chain_id_lookup.items()],
+        )
+
+        missing_chain_ids = sorted(
+            {chain_name for chain_name in transform_chain_ids if chain_name not in chain_id_lookup}
+        )
+        if missing_chain_ids:
+            raise ValueError(
+                "CellPack transform rows reference missing molecule objects: "
+                f"{missing_chain_ids}"
+            )
+
+        chain_id_int = np.array(
+            [chain_id_lookup[chain_name] for chain_name in transform_chain_ids],
+            dtype=int,
+        )
+        return chain_id_int, instance_mol_ids
 
     def _assign_colors(self, obj: bpy.types.Object, array: AtomArray):
         # random color per chain
@@ -143,13 +242,14 @@ class CellPack(Ensemble):
 
         for i, mol_id in enumerate(instance_mol_ids):
             array = self.molecules[mol_id]
-            print(i, "array", len(array), array[0], mol_id)
+            print(f"CellPack instance slot[{i}]: {mol_id} ({len(array)} atoms)")
             obj = create_object(
                 array=array,
                 name=mol_id,
                 collection=collection,
             )
             obj.mn.entity_type = self._entity_type.value
+            self._hide_source_chain_object(obj)
 
             if len(self.color_entity) > 0:
                 self._assign_colors(obj, array)
@@ -164,90 +264,37 @@ class CellPack(Ensemble):
 
         self.data_collection = collection
         self.instance_collection = collection
+        print("CellPack: source chain objects hidden; only the instanced ensemble stays visible")
 
         return collection
 
-    def _sync_data_object_chain_id_to_collection_order(self) -> None:
-        if self.file._is_petworld:
-            # PETWORLD uses pdb_model_num as the effective chain selector later.
-            return
+    def _debug_instance_collection_order(self) -> None:
+        actual_ids = np.asarray([obj.name for obj in self.instance_collection.objects]).astype(str)
+        collection_info_ids = self._instance_ids_for_mapping()
 
-        transform_chain_ids = np.asarray(self.transformations["chain_id"]).astype(str)
-        collection_chain_ids_insertion = np.asarray(
-            [obj.name for obj in self.instance_collection.objects]
-        ).astype(str)
-        collection_chain_ids = np.asarray(
-            sorted(
-                collection_chain_ids_insertion.tolist(),
-                key=self._blender_name_sort_key,
-            )
-        ).astype(str)
+        self._debug_print_items("CellPack collection.objects order", actual_ids)
+        self._debug_print_items("CellPack Collection Info instance order", collection_info_ids)
 
-        print("CellPack actual collection.objects order (post-creation)")
-        for idx, chain_name in enumerate(collection_chain_ids_insertion):
-            print(f"  [{idx}] {chain_name}")
-
-        print("CellPack predicted Ensemble Instance order (case-insensitive natural name sort)")
-        for idx, chain_name in enumerate(collection_chain_ids):
-            print(f"  [{idx}] {chain_name}")
-
-        chain_id_lookup = {chain_name: idx for idx, chain_name in enumerate(collection_chain_ids)}
-        missing_chain_ids = sorted(
-            {chain_name for chain_name in transform_chain_ids if chain_name not in chain_id_lookup}
-        )
-        if missing_chain_ids:
-            print(
-                "CellPack: cannot sync chain_id mapping, missing in collection order:",
-                missing_chain_ids,
-            )
-            return
-
-        chain_id_int = np.array([chain_id_lookup[chain_name] for chain_name in transform_chain_ids])
-        store_named_attribute(
-            obj=self.object,
-            name="chain_id",
-            data=chain_id_int,
-            atype=AttributeTypes.INT,
-        )
-        self.object["chain_ids"] = collection_chain_ids
-        print("CellPack: synced data object chain_id mapping to collection order")
+        if np.array_equal(actual_ids, collection_info_ids):
+            print("CellPack: collection.objects order matches Collection Info ordering")
+        else:
+            print("CellPack: Collection Info reorders child instances for Pick Instance")
 
     def _create_data_object(self, name="DataObject"):
-        transform_chain_ids = np.asarray(self.transformations["chain_id"]).astype(str)
-        transform_model_nums = np.asarray(self.transformations["pdb_model_num"]).astype(int)
-        unique_chain_ids = np.unique(transform_chain_ids)
-        collection_chain_ids = self._instance_mol_ids_for_collection()
-
-        print("CellPack transform chain_id -> int mapping (used for data object chain_id)")
-        for idx, chain_name in enumerate(unique_chain_ids):
-            print(f"  [{idx}] {chain_name}")
-
-        print("CellPack collection object order (used by Ensemble Instance)")
-        for idx, chain_name in enumerate(collection_chain_ids):
-            print(f"  [{idx}] {chain_name}")
-
-        if not np.array_equal(unique_chain_ids, collection_chain_ids):
-            print("WARNING: transform chain_id encoding order does not match collection order")
+        chain_id_int, instance_mol_ids = self._transform_instance_indices()
 
         bob = BlenderObject(
             bl.mesh.create_data_object(
                 self.transformations, name=name, collection=bl.coll.mn()
             )
         )
-        bob.object["chain_ids"] = collection_chain_ids
-        print("chain_ids", bob.object["chain_ids"])
-        # if we are dealing with petworld data, overwrite the chain_id for the data object
-        if self.file._is_petworld:
-            print(
-                "PETWORLD: overwriting data object chain_id with pdb_model_num before Ensemble Instance"
-            )
-            print("PETWORLD transform chain_id -> pdb_model_num pairs")
-            for chain_name, model_num in sorted(
-                set(zip(transform_chain_ids.tolist(), transform_model_nums.tolist())),
-                key=lambda item: (item[1], item[0]),
-            ):
-                print(f"  {chain_name} -> {model_num}")
-            bob.store_named_attribute(bob.named_attribute("pdb_model_num"), "chain_id")
+        bob.object["chain_ids"] = instance_mol_ids.tolist()
+        bob.store_named_attribute(
+            data=chain_id_int,
+            name="chain_id",
+            atype=AttributeTypes.INT,
+        )
+        self._debug_print_items("CellPack stored chain_ids", instance_mol_ids)
 
         return bob.object
 

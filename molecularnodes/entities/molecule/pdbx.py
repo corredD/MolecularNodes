@@ -33,7 +33,10 @@ class PDBXReader(ReaderBase):
     ) -> struc.AtomArray | struc.AtomArrayStack:
         try:
             array = pdbx.get_structure(
-                self.file, model=model, extra_fields=self._extra_fields, use_author_fields=False
+                self.file,
+                model=model,
+                extra_fields=self._extra_fields,
+                use_author_fields=False,
             )
         except InvalidFileError:
             array = pdbx.get_component(self.file)
@@ -77,7 +80,8 @@ class PDBXReader(ReaderBase):
         ]
 
         columns = [category[name].as_array().astype(float) for name in matrix_columns]
-        matrices = np.empty((len(columns[0]), 4, 4), float)
+        matrices = np.zeros((len(columns[0]), 4, 4), float)
+        matrices[:, 3, 3] = 1.0
 
         col_mask = np.tile((0, 1, 2, 3), 3)
         row_mask = np.repeat((0, 1, 2), 4)
@@ -273,13 +277,19 @@ class CIFAssemblyParser:
         # However, by default `PDBxFile` uses the `auth_asym_id` as
         # chain ID
         matrices = []
-        pdb_model_num = -1
-        for id, op_expr, asym_id_expr in zip(
+        model_nums = _assembly_model_numbers(assembly_gen_category)
+        if "PDB_model_num" in assembly_gen_category:
+            print(
+                "CIFAssemblyParser: using explicit PDB_model_num values from "
+                "pdbx_struct_assembly_gen"
+            )
+
+        for id, op_expr, asym_id_expr, pdb_model_num in zip(
             assembly_gen_category["assembly_id"].as_array(str),
             assembly_gen_category["oper_expression"].as_array(str),
             assembly_gen_category["asym_id_list"].as_array(str),
+            model_nums,
         ):
-            pdb_model_num += 1
             # Find the operation expressions for given assembly ID
             # We already asserted that the ID is actually present
             if id != assembly_id:
@@ -289,13 +299,23 @@ class CIFAssemblyParser:
 
             affected_chain_ids = asym_id_expr.split(",")
 
-            for i, operation in enumerate(operations):
-                # for op_step in operation:
+            for operation in operations:
+                # Compound operator expressions need a single composed transform.
+                # if len(operation) > 1:
+                #     print(
+                #         "CIFAssemblyParser: composing operators",
+                #         operation,
+                #         "for assembly",
+                #         assembly_id,
+                #     )
+                matrix = _compose_operation_matrices(
+                    [transformation_dict[op_id] for op_id in operation]
+                )
                 matrices.append(
                     {
                         "chain_ids": affected_chain_ids,
-                        "matrix": transformation_dict[operation[0]].tolist(),
-                        "pdb_model_num": pdb_model_num,
+                        "matrix": matrix.tolist(),
+                        "pdb_model_num": int(pdb_model_num),
                     }
                 )
 
@@ -327,7 +347,9 @@ def _extract_matrices(category, scale=True):
 
     columns = [category[name].as_array().astype(float) for name in matrix_columns]
     n = 4 if scale else 3
-    matrices = np.empty((len(columns[0]), n, 4), float)
+    matrices = np.zeros((len(columns[0]), n, 4), float)
+    if n == 4:
+        matrices[:, 3, 3] = 1.0
 
     col_mask = np.tile((0, 1, 2, 3), 3)
     row_mask = np.repeat((0, 1, 2), 4)
@@ -335,6 +357,13 @@ def _extract_matrices(category, scale=True):
         matrices[:, rowi, coli] = column
 
     return dict(zip(category["id"].as_array(str), matrices))
+
+
+def _assembly_model_numbers(category):
+    if "PDB_model_num" in category:
+        # PETWORLD stores the instance key explicitly per assembly row.
+        return category["PDB_model_num"].as_array().astype(int)
+    return np.arange(len(category["assembly_id"].as_array(str)), dtype=int)
 
 
 def _chain_transformations(rotations, translations):
@@ -357,8 +386,16 @@ def _chain_transformations(rotations, translations):
         matrix[3, 3] = 1
         total_matrix = matrix @ total_matrix
 
-    # return total_matrix[:3, :3], total_matrix[:3, 3]
-    return matrix
+    return total_matrix
+
+
+def _compose_operation_matrices(matrices):
+    if len(matrices) == 1:
+        return np.array(matrices[0], dtype=float)
+
+    rotations = [matrix[:3, :3] for matrix in matrices]
+    translations = [matrix[:3, 3] for matrix in matrices]
+    return _chain_transformations(rotations, translations)
 
 
 def _get_transformations(struct_oper):

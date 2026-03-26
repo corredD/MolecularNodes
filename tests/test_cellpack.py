@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 import pytest
 import molecularnodes as mn
+from molecularnodes.entities.ensemble.cellpack import CellPack
 from molecularnodes.nodes import nodes
 from .constants import data_dir
 
@@ -29,11 +30,16 @@ def maybe_unzip(file):
 def test_load_petworld(file):
     file_path = maybe_unzip(data_dir / "cellpack" / file)
 
-    _ens = mn.entities.ensemble.load_cellpack(
+    ens = mn.entities.ensemble.load_cellpack(
         file_path=file_path,
         name="CellPack",
         node_setup=False,
         fraction=0.1,
+    )
+    obj_names = [obj.name for obj in ens.instance_collection.objects]
+    assert list(ens.object["chain_ids"]) == sorted(
+        obj_names,
+        key=CellPack._blender_name_sort_key,
     )
 
 
@@ -46,8 +52,11 @@ def test_load_cellpack(snapshot, format):
     assert ens.object.mn.entity_type == ens._entity_type.value
 
     assert ens.name == Path(file_path).name
-    assert snapshot == str(ens.object["chain_ids"])
     obj_names = [obj.name for obj in ens.instance_collection.objects]
+    assert list(ens.object["chain_ids"]) == sorted(
+        obj_names,
+        key=CellPack._blender_name_sort_key,
+    )
     assert snapshot == "\n".join(obj_names)
 
     ens.node_group.nodes["Ensemble Instance"].inputs["As Points"].default_value = False
